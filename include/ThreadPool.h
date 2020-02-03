@@ -1,5 +1,18 @@
 #pragma once
 
+#ifdef AFFINITY
+#if defined __sun__
+#include <sys/types.h>
+#include <sys/processor.h>
+#include <sys/procset.h>
+#include <unistd.h>	/* For sysconf */
+#elif __linux__
+#include <cstdio>	/* For fprintf */
+#include <sched.h>
+#endif
+#endif
+
+#include <cstddef>	/* For std::size_t */
 #include <functional>
 #include <future>
 #include <mutex>
@@ -14,10 +27,10 @@ class ThreadPool {
 private:
   class ThreadWorker {
   private:
-    int m_id;
+    std::size_t m_id;
     ThreadPool * m_pool;
   public:
-    ThreadWorker(ThreadPool * pool, const int id)
+    ThreadWorker(ThreadPool * pool, const std::size_t id)
       : m_pool(pool), m_id(id) {
     }
 
@@ -45,7 +58,7 @@ private:
   std::mutex m_conditional_mutex;
   std::condition_variable m_conditional_lock;
 public:
-  ThreadPool(const int n_threads)
+  ThreadPool(const std::size_t n_threads)
     : m_threads(std::vector<std::thread>(n_threads)), m_shutdown(false) {
   }
 
@@ -57,7 +70,44 @@ public:
 
   // Inits thread pool
   void init() {
-    for (int i = 0; i < m_threads.size(); ++i) {
+    #if (defined __sun__ || defined __linux__) && defined AFFINITY
+    std::size_t v_cpu = 0;
+    std::size_t v_cpu_max = std::thread::hardware_concurrency() - 1;
+    #endif
+
+    #if defined __sun__ && defined AFFINITY
+    std::vector<processorid_t> v_cpu_id;	/* Struct for CPU/core ID */
+
+    processorid_t i, cpuid_max;
+    cpuid_max = sysconf(_SC_CPUID_MAX);
+    for (i = 0; i <= cpuid_max; i++) {
+        if (p_online(i, P_STATUS) != -1)	/* Get only online cores ID */
+            v_cpu_id.push_back(i);
+    }
+    #endif
+
+    for (std::size_t i = 0; i < m_threads.size(); ++i) {
+
+	#if (defined __sun__ || defined __linux__) && defined AFFINITY
+	if (v_cpu > v_cpu_max) {
+		v_cpu = 0;
+	}
+
+	#ifdef __sun__
+	processor_bind(P_LWPID, P_MYID, v_cpu_id[v_cpu], NULL);
+	#elif __linux__
+	cpu_set_t mask;
+	CPU_ZERO(&mask);
+	CPU_SET(v_cpu, &mask);
+	pthread_t thread = pthread_self();
+	if (pthread_setaffinity_np(thread, sizeof(cpu_set_t), &mask) != 0) {
+		fprintf(stderr, "Error setting thread affinity\n");
+	}
+	#endif
+
+	++v_cpu;
+	#endif
+
       m_threads[i] = std::thread(ThreadWorker(this, i));
     }
   }

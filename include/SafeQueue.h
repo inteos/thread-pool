@@ -28,7 +28,7 @@ public:
     return m_queue.empty();
   }
   
-  int size() {
+  std::size_t size() {
     std::unique_lock<std::mutex> lock(m_mutex);
     return m_queue.size();
   }
