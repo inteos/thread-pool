@@ -41,33 +41,55 @@
 #include <mutex>
 #include <queue>
 
-// Thread safe implementation of a Queue using a std::queue
+
+/*
+ * Thread safe implementation of a Queue using a std::queue
+ */
 template <typename T>
 class SafeQueue {
 private:
    std::queue<T> queue;
    std::mutex mutex;
+
 public:
+/*
+ * Standard class ctor/dtor
+ */
    SafeQueue() {};
    SafeQueue(SafeQueue& other) = delete;
    ~SafeQueue() {};
 
+/*
+ * Checks if a queue is empty
+ */
    inline bool empty() {
       std::lock_guard<std::mutex> l(mutex);
       return queue.empty();
    }
 
-   std::size_t size() {
+/*
+ * Return the size of the queue
+ */
+   inline std::size_t size()
+   {
       std::lock_guard<std::mutex> l(mutex);
       return queue.size();
    }
 
-   void enqueue(T& t) {
+/*
+ * Add an object to the queue
+ */
+   inline void enqueue(T& t)
+   {
       std::lock_guard<std::mutex> l(mutex);
       queue.push(t);
    }
 
-   bool dequeue(T& t) {
+/*
+ * Remove and return the object from the queue
+ */
+   inline bool dequeue(T& t)
+   {
       std::lock_guard<std::mutex> l(mutex);
 
       if (queue.empty()) {
