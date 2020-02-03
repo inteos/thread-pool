@@ -9,6 +9,7 @@ nbproject/
 *.filters
 *.vcxproj
 *.sln
+.vscode
 
 # Cmake
 build
