@@ -1,18 +1,59 @@
-#pragma once
+/* -*- coding: UTF-8 -*-
+ *
+ *  Copyright (c) 2020 by Inteos Sp. z o.o.
+ *  All rights reserved. See LICENSE file for details.
+ */
+
+/*
+ * File:   ThreadPool.h
+ *
+ * This is a modified version of the ThreadPool class by Mariano Trebino
+ * Author: mtrebi - https://github.com/mtrebi
+ * Project: thread-pool - https://github.com/mtrebi/thread-pool
+ * All thread-pool source code is available at MIT License.
+ *
+ * MIT License
+ *
+ * Copyright (c) 2016 Mariano Trebino
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+
+#ifndef THREADPOOL_H
+#define THREADPOOL_H
 
 #ifdef AFFINITY
 #if defined __sun__
 #include <sys/types.h>
 #include <sys/processor.h>
 #include <sys/procset.h>
-#include <unistd.h>	/* For sysconf */
-#elif __linux__
-#include <cstdio>	/* For fprintf */
+#include <unistd.h>     /* For sysconf */
+#elif defined __linux__
+#include <cstdio>       /* For fprintf */
 #include <sched.h>
+#elif defined __APPLE__
+#include <mach/thread_policy.h>
+#include <mach/thread_act.h>
 #endif
 #endif
 
-#include <cstddef>	/* For std::size_t */
+#include <cstddef>      /* For std::size_t */
 #include <functional>
 #include <future>
 #include <mutex>
@@ -25,125 +66,57 @@
 
 class ThreadPool {
 private:
-  class ThreadWorker {
-  private:
-    std::size_t m_id;
-    ThreadPool * m_pool;
-  public:
-    ThreadWorker(ThreadPool * pool, const std::size_t id)
-      : m_pool(pool), m_id(id) {
-    }
+   std::atomic<bool> shut_flag {false};
+   SafeQueue<std::function<void()>> job_queue {};
+   std::vector<std::thread> threads {};
+   std::mutex mutex {};
+   std::condition_variable waitcv {};
 
-    void operator()() {
-      std::function<void()> func;
-      bool dequeued;
-      while (!m_pool->m_shutdown) {
-        {
-          std::unique_lock<std::mutex> lock(m_pool->m_conditional_mutex);
-          if (m_pool->m_queue.empty()) {
-            m_pool->m_conditional_lock.wait(lock);
-          }
-          dequeued = m_pool->m_queue.dequeue(func);
-        }
-        if (dequeued) {
-          func();
-        }
-      }
-    }
-  };
+   class ThreadWorker {
+   private:
+      ThreadPool * ptr {};
 
-  bool m_shutdown;
-  SafeQueue<std::function<void()>> m_queue;
-  std::vector<std::thread> m_threads;
-  std::mutex m_conditional_mutex;
-  std::condition_variable m_conditional_lock;
+   public:
+      ThreadWorker(ThreadPool * pool);
+      void operator()();
+   };
+
 public:
-  ThreadPool(const std::size_t n_threads)
-    : m_threads(std::vector<std::thread>(n_threads)), m_shutdown(false) {
-  }
+   ThreadPool(const std::size_t threads_num = std::thread::hardware_concurrency());
+   ThreadPool(const ThreadPool &) = delete;
+   ThreadPool(ThreadPool &&) = delete;
 
-  ThreadPool(const ThreadPool &) = delete;
-  ThreadPool(ThreadPool &&) = delete;
+   ThreadPool & operator=(const ThreadPool &) = delete;
+   ThreadPool & operator=(ThreadPool &&) = delete;
 
-  ThreadPool & operator=(const ThreadPool &) = delete;
-  ThreadPool & operator=(ThreadPool &&) = delete;
+   // Inits thread pool
+   void init();
 
-  // Inits thread pool
-  void init() {
-    #if (defined __sun__ || defined __linux__) && defined AFFINITY
-    std::size_t v_cpu = 0;
-    std::size_t v_cpu_max = std::thread::hardware_concurrency() - 1;
-    #endif
+   // Waits until threads finish their current task and shutdowns the pool
+   void shutdown();
 
-    #if defined __sun__ && defined AFFINITY
-    std::vector<processorid_t> v_cpu_id;	/* Struct for CPU/core ID */
+   // Submit a function to be executed asynchronously by the pool
+   template<typename F, typename...Args>
+   auto submit(F&& f, Args&&... args) -> std::future<decltype(f(args...))> {
+      // Create a function with bounded parameters ready to execute
+      std::function<decltype(f(args...))()> func = std::bind(std::forward<F>(f), std::forward<Args>(args)...);
+      // Encapsulate it into a shared ptr in order to be able to copy construct / assign
+      auto task_ptr = std::make_shared<std::packaged_task<decltype(f(args...))()>>(func);
 
-    processorid_t i, cpuid_max;
-    cpuid_max = sysconf(_SC_CPUID_MAX);
-    for (i = 0; i <= cpuid_max; i++) {
-        if (p_online(i, P_STATUS) != -1)	/* Get only online cores ID */
-            v_cpu_id.push_back(i);
-    }
-    #endif
+      // Wrap packaged task into void function
+      std::function<void()> wrapper_func = [task_ptr]() {
+         (*task_ptr)();
+      };
 
-    for (std::size_t i = 0; i < m_threads.size(); ++i) {
+      // Enqueue generic wrapper function
+      job_queue.enqueue(wrapper_func);
 
-	#if (defined __sun__ || defined __linux__) && defined AFFINITY
-	if (v_cpu > v_cpu_max) {
-		v_cpu = 0;
-	}
+      // Wake up one thread if its waiting
+      waitcv.notify_one();
 
-	#ifdef __sun__
-	processor_bind(P_LWPID, P_MYID, v_cpu_id[v_cpu], NULL);
-	#elif __linux__
-	cpu_set_t mask;
-	CPU_ZERO(&mask);
-	CPU_SET(v_cpu, &mask);
-	pthread_t thread = pthread_self();
-	if (pthread_setaffinity_np(thread, sizeof(cpu_set_t), &mask) != 0) {
-		fprintf(stderr, "Error setting thread affinity\n");
-	}
-	#endif
-
-	++v_cpu;
-	#endif
-
-      m_threads[i] = std::thread(ThreadWorker(this, i));
-    }
-  }
-
-  // Waits until threads finish their current task and shutdowns the pool
-  void shutdown() {
-    m_shutdown = true;
-    m_conditional_lock.notify_all();
-    
-    for (int i = 0; i < m_threads.size(); ++i) {
-      if(m_threads[i].joinable()) {
-        m_threads[i].join();
-      }
-    }
-  }
-
-  // Submit a function to be executed asynchronously by the pool
-  template<typename F, typename...Args>
-  auto submit(F&& f, Args&&... args) -> std::future<decltype(f(args...))> {
-    // Create a function with bounded parameters ready to execute
-    std::function<decltype(f(args...))()> func = std::bind(std::forward<F>(f), std::forward<Args>(args)...);
-    // Encapsulate it into a shared ptr in order to be able to copy construct / assign 
-    auto task_ptr = std::make_shared<std::packaged_task<decltype(f(args...))()>>(func);
-
-    // Wrap packaged task into void function
-    std::function<void()> wrapper_func = [task_ptr]() {
-      (*task_ptr)(); 
-    };
-
-    // Enqueue generic wrapper function
-    m_queue.enqueue(wrapper_func);
-
-    // Wake up one thread if its waiting
-    m_conditional_lock.notify_one();
-
-    // Return future from promise
-    return task_ptr->get_future();
-  }
+      // Return future from promise
+      return task_ptr->get_future();
+   }
 };
+
+#endif   /* THREADPOOL_H */
