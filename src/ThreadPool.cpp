@@ -102,7 +102,7 @@ void ThreadPool::init() {
 #ifdef __linux__
       cpu_set_t mask;
       CPU_ZERO(&mask);
-      CPU_SET(v_cpu, &mask);
+      CPU_SET(vcpu, &mask);
       pthread_setaffinity_np(t.native_handle(), sizeof(cpu_set_t), &mask);
 #endif
 
