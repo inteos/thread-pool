@@ -6,10 +6,12 @@
  */
 
 /*
- * File:   HashIndexValueTests.cpp
+ * File:   test_thread_pool.cpp
  * Author: radekk
  *
- * Created on 30 października 2019, 16:27
+ * Created on 04 lutego 2020, 10:27
+ *
+ *
  */
 
 #include <iostream>
@@ -22,36 +24,65 @@ std::random_device rd;
 std::mt19937 mt(rd());
 std::uniform_int_distribution<int> dist(-1000, 1000);
 auto rnd = std::bind(dist, mt);
+std::atomic<int> counter = {0};
 
+void simulate_hard_computation()
+{
+   std::this_thread::sleep_for(std::chrono::milliseconds(200 + rnd()));
+}
 
-void simulate_hard_computation() {
-  std::this_thread::sleep_for(std::chrono::milliseconds(2000 + rnd()));
+void test_thread1()
+{
+   simulate_hard_computation();
+   counter++;
 }
 
 // Simple function that adds multiplies two numbers and prints the result
 void multiply(const int a, const int b) {
-  simulate_hard_computation();
-  const int res = a * b;
-  std::cout << a << " * " << b << " = " << res << std::endl;
+   simulate_hard_computation();
+   const int res = a * b;
+   std::cout << a << " * " << b << " = " << res << std::endl;
 }
 
 // Same as before but now we have an output parameter
 void multiply_output(int & out, const int a, const int b) {
-  simulate_hard_computation();
-  out = a * b;
-  std::cout << a << " * " << b << " = " << out << std::endl;
+   simulate_hard_computation();
+   out = a * b;
+   std::cout << a << " * " << b << " = " << out << std::endl;
 }
 
 // Same as before but now we have an output parameter
 int multiply_return(const int a, const int b) {
-  simulate_hard_computation();
-  const int res = a * b;
-  std::cout << a << " * " << b << " = " << res << std::endl;
-  return res;
+   simulate_hard_computation();
+   const int res = a * b;
+   std::cout << a << " * " << b << " = " << res << std::endl;
+   return res;
 }
 
-TEST_CASE ("Execute simple tasks"){
+TEST_CASE ("Execute simple tasks")
+{
+   ThreadPool pool(4);
+   pool.init();
 
+   for (auto i = 0; i < 8; i++){
+      pool.submit(test_thread1);
+   }
+   pool.shutdown();
+
+   CHECK (counter == 4);
+};
+
+TEST_CASE ("Execute simple tasks with abort")
+{
+   ThreadPool pool(4);
+   pool.init();
+
+   for (auto i = 0; i < 8; i++){
+      pool.submit(test_thread1);
+   }
+   pool.shutdown(true);
+
+   CHECK (counter != 4);
 };
 
 void example() {
