@@ -1,0 +1,2 @@
+#cmakedefine HAVE_SIGNAL_H
+#cmakedefine HAVE_SYSTYPES_H

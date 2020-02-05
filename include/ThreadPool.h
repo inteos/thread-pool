@@ -38,21 +38,6 @@
 #ifndef THREADPOOL_H
 #define THREADPOOL_H
 
-#ifdef AFFINITY
-#if defined __sun__
-#include <sys/types.h>
-#include <sys/processor.h>
-#include <sys/procset.h>
-#include <unistd.h>     /* For sysconf */
-#elif defined __linux__
-#include <cstdio>       /* For fprintf */
-#include <sched.h>
-#elif defined __APPLE__
-#include <mach/thread_policy.h>
-#include <mach/thread_act.h>
-#endif
-#endif
-
 #include <cstddef>      /* For std::size_t */
 #include <functional>
 #include <future>
@@ -66,11 +51,12 @@
 
 class ThreadPool {
 private:
-   std::atomic<bool> shut_flag {false};
+   std::atomic_bool shut_flag { false };
    SafeQueue<std::function<void()>> job_queue {};
    std::vector<std::thread> threads {};
    std::mutex mutex {};
    std::condition_variable waitcv {};
+   std::atomic_size_t running_threads { 0 };
 
    class ThreadWorker {
    private:
@@ -82,18 +68,21 @@ private:
    };
 
 public:
+   // Default ctor
    ThreadPool(const std::size_t threads_num = std::thread::hardware_concurrency());
+   // Remove copy ctors
    ThreadPool(const ThreadPool &) = delete;
    ThreadPool(ThreadPool &&) = delete;
 
+   // Remove default operators
    ThreadPool & operator=(const ThreadPool &) = delete;
    ThreadPool & operator=(ThreadPool &&) = delete;
 
    // Inits thread pool
-   void init();
+   void init(bool cpuaffinity = false);
 
-   // Waits until threads finish their current task and shutdowns the pool
-   void shutdown();
+   // Shutdowns the pool waiting for current tasks finish
+   void shutdown(bool abort = false);
 
    // Submit a function to be executed asynchronously by the pool
    template<typename F, typename...Args>
@@ -117,6 +106,15 @@ public:
       // Return future from promise
       return task_ptr->get_future();
    }
+
+   // Return the size of the pool
+   inline std::size_t size() { return threads.size(); }
+
+   // Return the size of the job queue
+   inline std::size_t queue_size() { return job_queue.size(); }
+
+   // Return the number of threads running and executing jobs
+   inline std::size_t num_running() { return running_threads; }
 };
 
 #endif   /* THREADPOOL_H */
