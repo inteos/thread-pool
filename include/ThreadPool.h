@@ -56,6 +56,7 @@ private:
    std::vector<std::thread> threads {};
    std::mutex mutex {};
    std::condition_variable waitcv {};
+   std::atomic_size_t available_threads { 0 };
    std::atomic_size_t running_threads { 0 };
 
    class ThreadWorker {
@@ -73,6 +74,9 @@ public:
    // Remove copy ctors
    ThreadPool(const ThreadPool &) = delete;
    ThreadPool(ThreadPool &&) = delete;
+
+   // Defeult dtor
+   ~ThreadPool(){ shutdown(); };
 
    // Remove default operators
    ThreadPool & operator=(const ThreadPool &) = delete;
@@ -112,6 +116,9 @@ public:
 
    // Return the size of the job queue
    inline std::size_t queue_size() { return job_queue.size(); }
+
+   // Return the number of threads available for job execution
+   inline std::size_t num_available() { return available_threads; }
 
    // Return the number of threads running and executing jobs
    inline std::size_t num_running() { return running_threads; }

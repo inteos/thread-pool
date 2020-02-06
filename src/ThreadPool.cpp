@@ -72,6 +72,9 @@ void ThreadPool::ThreadWorker::operator()()
    std::function<void()> func;
    bool dequeued;
 
+   // signal thread avaliability
+   ptr->available_threads++;
+
    while (!ptr->shut_flag)
    {
       ThreadPool * poolptr = ptr;      // a little local helper
@@ -84,6 +87,7 @@ void ThreadPool::ThreadWorker::operator()()
                return !poolptr->job_queue.empty() || poolptr->shut_flag;
             });
 
+         // signal work start
          ptr->running_threads++;
          // get next task to complete
          dequeued = !ptr->shut_flag ? ptr->job_queue.dequeue(func) : false;
@@ -93,20 +97,28 @@ void ThreadPool::ThreadWorker::operator()()
       if (dequeued) {
          func();
       }
+
+      // signal work done
       ptr->running_threads--;
    }
+
+   // signal thread exit
+   ptr->available_threads--;
 };
 
 /*
- *
+ * Default ThreadPool ctor.
  */
-ThreadPool::ThreadPool(const std::size_t threads_num) : threads(std::vector<std::thread>(threads_num)) {};
+ThreadPool::ThreadPool(const std::size_t threads_num)
+   : threads(std::vector<std::thread>(threads_num > 0 ? threads_num : std::thread::hardware_concurrency())) {};
 
 /*
  *
  */
 void ThreadPool::init(bool cpuaffinity)
 {
+   shut_flag = false;
+
 #if defined __sun__ || defined __linux__ || defined __APPLE__
    if (cpuaffinity){
       // create threads and assign them to different cores
