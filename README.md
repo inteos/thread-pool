@@ -1,3 +1,13 @@
+# This is a fork of thread-pool simple library by mtrebi available at: https://github.com/mtrebi/thread-pool
+
+This is an overhaul version of the mtrebi's thread-pool library which is compatible in some extent only.
+The API and some behavior was changed. I fixed its bugs pointed on Issues and apply some PR's which I found useful.
+I added the unit tests to verify that it is working as expected.
+
+The API stay dead simple but powerful. I plan to update the documentation to reflect the current state of the code.
+So stay tuned.
+
+
 # Table of Contents
 &nbsp;[Introduction](https://github.com/mtrebi/thread-pool/blob/master/README.md#introduction)  <br/> 
 &nbsp;[Build instructions](https://github.com/mtrebi/thread-pool/blob/master/README.md#build-instructions)  <br/> 
